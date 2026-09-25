@@ -79,10 +79,12 @@ public class BoardGame {
         }
     }
     public boolean selectCell(int i, int j){
-        if(i<0 || i>= board.length || j<0 || j >= board[0].length ){
-            throw new RuntimeException("Cell no valid");
-        }
+        validateCoordinates(i, j);
         Cell cell = board[i][j];
+        if (cell.isMarked()) {
+            // una celda con bandera no se puede destapar hasta quitar la marca
+            return validWin();
+        }
         if(cell.isLandMine()){
             showAll(true);
             throw new RuntimeException("Game over");
@@ -130,10 +132,17 @@ public class BoardGame {
     }
 
     public void markCell(int i, int j) {
-        if(i<0 || i>= board.length || j<0 || j >= board[0].length ){
-            throw new RuntimeException("Cell no valid");
-        }
+        validateCoordinates(i, j);
         Cell cell = board[i][j];
-        cell.setMarked(!cell.isMarked());
+        if (cell.isHide()) {
+            cell.setMarked(!cell.isMarked());
+        }
+    }
+
+    private void validateCoordinates(int i, int j) {
+        if(i<0 || i>= board.length || j<0 || j >= board[0].length ){
+            throw new IllegalArgumentException("Cell no valid: (" + i + "," + j + ") está fuera del tablero "
+                    + board.length + "x" + board[0].length);
+        }
     }
 }

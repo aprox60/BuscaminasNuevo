@@ -15,6 +15,7 @@ import java.util.concurrent.Executors;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonParseException;
 
 import co.icesi.buscaminas.controllers.dtos.Request;
 import co.icesi.buscaminas.controllers.dtos.Response;
@@ -22,6 +23,8 @@ import co.icesi.buscaminas.model.Cell;
 import co.icesi.buscaminas.services.ServicesImpl;
 
 public class TCPController {
+
+    private static final int MAX_SIZE = 100;
 
     private ServicesImpl services;
 
@@ -99,54 +102,9 @@ public class TCPController {
                 BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(clientSocket.getOutputStream()));
 
                 String line = reader.readLine();
-                Request rq = gson.fromJson(line, Request.class);
-                log("Acción recibida de " + client + ": " + rq.action + " " + rq.data);
-                Map<String, String> data = rq.data;
-                Response response = new Response();
-                response.data = new HashMap<>();
-                switch (rq.action) {
-                    case "SELECT_CELL":
-                        int i = Integer.parseInt(data.get("i"));
-                        int j = Integer.parseInt(data.get("j"));
-                        try {
-                            boolean resp = services.selectCell(i, j);
-                            response.status = "OK";
-                            response.data.put("win", resp);
+                Response response = handle(line, client);
 
-                            response.data.put("gameEnd", resp);
-                        } catch (Exception e) {
-                            response.data.put("gameEnd", true);
-                            response.data.put("win", false);
-
-                        }
-                        Cell[][] board = services.printBoard();
-                        response.data.put("board", board);
-                        break;
-                    case "SOW_ALL":
-                        services.showAll(true);
-                        board = services.printBoard();
-                        response.status = "OK";
-                        response.data.put("board", board);
-                        break;
-                    case "GET_BOARD":
-                        board = services.printBoard();
-                        response.status = "OK";
-                        response.data.put("board", board);
-                        break;
-                    case "INIT_GAME":
-                        i = Integer.parseInt(data.get("n"));
-                        j = Integer.parseInt(data.get("m"));
-                        int m = Integer.parseInt(data.get("minas"));
-                        services.initGame(i, j, m);
-                        board = services.printBoard();
-                        response.status = "OK";
-                        response.data.put("board", board);
-                        break;
-
-                    default:
-                        break;
-                }
-
+                // gson sin pretty printing: la respuesta debe ser una sola línea
                 String json = gson.toJson(response);
                 writer.write(json);
                 writer.newLine();
@@ -155,10 +113,122 @@ public class TCPController {
                 reader.close();
 
                 clientSocket.close();
-                log("Cliente desconectado: " + client);
+                log("Respuesta enviada a " + client + ": status=" + response.status + ". Cliente desconectado");
             } catch (Exception e) {
-                e.printStackTrace();
+                log("Error atendiendo a " + client + ": " + e);
             }
+        }
+
+        private Response handle(String line, String client) {
+            if (line == null || line.isBlank()) {
+                return error("Petición vacía: se esperaba un JSON terminado en salto de línea");
+            }
+            Request rq;
+            try {
+                rq = gson.fromJson(line, Request.class);
+            } catch (JsonParseException e) {
+                log("JSON inválido de " + client + ": " + line);
+                return error("JSON inválido: " + e.getMessage());
+            }
+            if (rq == null || rq.action == null) {
+                return error("Falta el campo 'action'");
+            }
+            log("Acción recibida de " + client + ": " + rq.action + " " + rq.data);
+            Map<String, String> data = rq.data == null ? new HashMap<>() : rq.data;
+
+            try {
+                Response response = ok();
+                Cell[][] board;
+                switch (rq.action) {
+                    case "SELECT_CELL":
+                        int i = intParam(data, "i");
+                        int j = intParam(data, "j");
+                        try {
+                            boolean win = services.selectCell(i, j);
+                            response.data.put("win", win);
+                            response.data.put("gameEnd", win);
+                            if (win) {
+                                response.data.put("message", "¡Ganaste! Todas las celdas seguras fueron destapadas");
+                            }
+                        } catch (IllegalArgumentException e) {
+                            // coordenada inválida: error, pero la partida continúa
+                            return error(e.getMessage());
+                        } catch (RuntimeException e) {
+                            response.data.put("gameEnd", true);
+                            response.data.put("win", false);
+                            response.data.put("message", "Game over");
+                        }
+                        board = services.printBoard();
+                        response.data.put("board", board);
+                        break;
+                    case "MARK_CELL":
+                        i = intParam(data, "i");
+                        j = intParam(data, "j");
+                        services.markCell(i, j);
+                        board = services.printBoard();
+                        response.data.put("board", board);
+                        break;
+                    case "SOW_ALL":
+                        services.showAll(true);
+                        board = services.printBoard();
+                        response.data.put("board", board);
+                        break;
+                    case "GET_BOARD":
+                        board = services.printBoard();
+                        response.data.put("board", board);
+                        break;
+                    case "INIT_GAME":
+                        int n = intParam(data, "n");
+                        int m = intParam(data, "m");
+                        int minas = intParam(data, "minas");
+                        if (n <= 0 || m <= 0 || n > MAX_SIZE || m > MAX_SIZE) {
+                            return error("n y m deben estar entre 1 y " + MAX_SIZE);
+                        }
+                        if (minas <= 0 || minas >= n * m) {
+                            return error("minas debe ser mayor que 0 y menor que n*m (" + (n * m) + ")");
+                        }
+                        services.initGame(n, m, minas);
+                        board = services.printBoard();
+                        response.data.put("board", board);
+                        break;
+
+                    default:
+                        return error("Acción desconocida: " + rq.action);
+                }
+                return response;
+            } catch (IllegalArgumentException e) {
+                return error(e.getMessage());
+            } catch (RuntimeException e) {
+                log("Error procesando " + rq.action + ": " + e);
+                return error("Error interno del servidor: " + e.getMessage());
+            }
+        }
+
+        private int intParam(Map<String, String> data, String key) {
+            String value = data.get(key);
+            if (value == null) {
+                throw new IllegalArgumentException("Falta el parámetro '" + key + "'");
+            }
+            try {
+                return Integer.parseInt(value.trim());
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("El parámetro '" + key + "' debe ser un entero (recibido '" + value + "')");
+            }
+        }
+
+        private Response ok() {
+            Response response = new Response();
+            response.status = "OK";
+            response.data = new HashMap<>();
+            return response;
+        }
+
+        private Response error(String message) {
+            Response response = new Response();
+            response.status = "ERROR";
+            response.data = new HashMap<>();
+            response.data.put("message", message);
+            return response;
         }
 
     }
