@@ -1,0 +1,20 @@
+plugins {
+    id 'application'
+}
+
+application {
+    mainClass = 'co.icesi.buscaminas.Main'
+}
+
+run {
+    standardInput = System.in
+}
+
+jar {
+    manifest {
+        attributes(
+                'Main-Class': 'co.icesi.buscaminas.Main',
+                'Class-Path': configurations.runtimeClasspath.resolve().collect { it.toURI() }.join(' ')
+        )
+    }
+}

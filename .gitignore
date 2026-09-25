@@ -1,1 +1,13 @@
+# Gradle
 build/
+.gradle/
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+out/
+bin/
+
+# Compilados
+*.class
