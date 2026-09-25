@@ -8,6 +8,8 @@ application {
 
 run {
     standardInput = System.in
+    // la salida pasa por Gradle: se fuerza UTF-8 para que los acentos se vean bien
+    jvmArgs '-Dstdout.encoding=UTF-8', '-Dstderr.encoding=UTF-8'
 }
 
 jar {
