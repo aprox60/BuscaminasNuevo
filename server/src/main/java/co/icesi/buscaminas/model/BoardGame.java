@@ -65,19 +65,20 @@ public class BoardGame {
     }
 
     public synchronized void printBoard(){
-        System.out.println();
-        System.out.print("   ");
+        // se arma en un StringBuilder y se imprime de una vez para no mezclarse con los logs de otros hilos
+        StringBuilder sb = new StringBuilder("\n   ");
         for (int i = 0; i < board[0].length; i++) {
-            System.out.print(" " + i);
+            sb.append(" ").append(i);
         }
-        System.out.println();
+        sb.append("\n");
         for (int i = 0; i <board.length; i++) {
-            System.out.print(i+" [");
+            sb.append(i).append(" [");
             for (int j = 0; j < board[0].length; j++) {
-                System.out.print(" "+board[i][j]);
+                sb.append(" ").append(board[i][j]);
             }
-            System.out.println(" ]");
+            sb.append(" ]\n");
         }
+        System.out.print(sb);
     }
     public synchronized boolean selectCell(int i, int j){
         validateCoordinates(i, j);
