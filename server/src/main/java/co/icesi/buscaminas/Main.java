@@ -8,15 +8,47 @@ import co.icesi.buscaminas.services.ServicesImpl;
 
 public class Main {
 
+    private static final int DEFAULT_PORT = 12345;
+
+    /**
+     * Uso: Main [puerto] [--local]
+     * --local lanza además el juego por consola sobre el mismo tablero (solo para depuración).
+     */
     public static void main(String[] args)
     {
-        ServicesImpl serv = new ServicesImpl();
-        new Thread(() -> apply(serv.getGame())).start();
-        // TCPController controller = new TCPController(serv);
-        // controller.startService();
+        int port = DEFAULT_PORT;
+        boolean local = false;
+        for (String arg : args) {
+            if (arg.equals("--local")) {
+                local = true;
+                continue;
+            }
+            try {
+                port = Integer.parseInt(arg);
+            } catch (NumberFormatException e) {
+                System.err.println("Puerto inválido: '" + arg + "'. Uso: Main [puerto] [--local]");
+                System.exit(1);
+            }
+            if (port < 1 || port > 65535) {
+                System.err.println("El puerto debe estar entre 1 y 65535 (recibido " + port + ")");
+                System.exit(1);
+            }
+        }
 
-        TCPController iceController = new TCPController(serv);
-        iceController.startService();
+        ServicesImpl serv = new ServicesImpl();
+        if (local) {
+            new Thread(() -> apply(serv.getGame()), "local-console").start();
+        }
+
+        TCPController controller;
+        try {
+            controller = new TCPController(serv, port);
+        } catch (IllegalStateException e) {
+            System.err.println("Error al iniciar el servidor: " + e.getMessage());
+            System.exit(1);
+            return;
+        }
+        controller.startService();
     }
     public static void apply(BoardGame bg) {
 

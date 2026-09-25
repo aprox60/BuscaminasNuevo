@@ -2,6 +2,7 @@ package co.icesi.buscaminas.controllers;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.net.InetAddress;
@@ -9,7 +10,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import com.google.gson.Gson;
@@ -28,7 +29,7 @@ public class TCPController {
 
     private boolean running;
 
-    private Executor executor;
+    private ExecutorService executor;
 
     private Gson gson;
 
@@ -39,12 +40,14 @@ public class TCPController {
     public TCPController(ServicesImpl services, int port) {
         this.services = services;
         try {
-            serverSocket = new ServerSocket(port, 10, InetAddress.getByName("192.168.131.214"));
-            executor = Executors.newFixedThreadPool(5);
-            gson = new GsonBuilder().create();
-        } catch (Exception e) {
-            e.printStackTrace();
+            // 0.0.0.0: escucha en todas las interfaces de red de la máquina
+            serverSocket = new ServerSocket(port, 50, InetAddress.getByName("0.0.0.0"));
+        } catch (IOException e) {
+            throw new IllegalStateException("No se pudo abrir el puerto " + port
+                    + " (¿está en uso o no hay permisos?): " + e.getMessage(), e);
         }
+        executor = Executors.newFixedThreadPool(5);
+        gson = new GsonBuilder().create();
         running = true;
     }
 
@@ -57,7 +60,8 @@ public class TCPController {
     }
 
     public void startService() {
-        System.out.println("TCP Service started on port " + serverSocket.getLocalPort());
+        log("Servidor TCP escuchando en " + serverSocket.getInetAddress().getHostAddress()
+                + ":" + serverSocket.getLocalPort() + " (pool de 5 hilos)");
         while (running) {
             try {
                 executor.execute(new TCPClientHandler(serverSocket.accept(), services));
@@ -72,6 +76,10 @@ public class TCPController {
         }
     }
 
+    static void log(String msg) {
+        System.out.println("[" + Thread.currentThread().getName() + "] " + msg);
+    }
+
     class TCPClientHandler implements Runnable {
         //TODO: 
         private Socket clientSocket;
@@ -84,13 +92,15 @@ public class TCPController {
 
         @Override
         public void run() {
+            String client = clientSocket.getInetAddress().getHostAddress() + ":" + clientSocket.getPort();
             try {
-                System.out.println("Client connected: " + clientSocket.getInetAddress());
+                log("Cliente conectado: " + client);
                 BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
                 BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(clientSocket.getOutputStream()));
 
                 String line = reader.readLine();
                 Request rq = gson.fromJson(line, Request.class);
+                log("Acción recibida de " + client + ": " + rq.action + " " + rq.data);
                 Map<String, String> data = rq.data;
                 Response response = new Response();
                 response.data = new HashMap<>();
@@ -145,7 +155,7 @@ public class TCPController {
                 reader.close();
 
                 clientSocket.close();
-                System.out.println("Client disconnected: " + clientSocket.getInetAddress());
+                log("Cliente desconectado: " + client);
             } catch (Exception e) {
                 e.printStackTrace();
             }
