@@ -8,6 +8,8 @@ import java.io.OutputStreamWriter;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketTimeoutException;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -26,11 +28,13 @@ public class TCPController {
 
     private static final int MAX_SIZE = 100;
 
+    private static final int READ_TIMEOUT_MS = 10000;
+
     private ServicesImpl services;
 
     private ServerSocket serverSocket;
 
-    private boolean running;
+    private volatile boolean running;
 
     private ExecutorService executor;
 
@@ -52,6 +56,18 @@ public class TCPController {
         executor = Executors.newFixedThreadPool(5);
         gson = new GsonBuilder().create();
         running = true;
+        Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "shutdown-hook"));
+    }
+
+    private void shutdown() {
+        log("Deteniendo el servidor...");
+        running = false;
+        executor.shutdown();
+        try {
+            serverSocket.close();
+        } catch (IOException e) {
+            log("Error cerrando el ServerSocket: " + e.getMessage());
+        }
     }
 
     public void setRunning(boolean running) {
@@ -69,14 +85,12 @@ public class TCPController {
             try {
                 executor.execute(new TCPClientHandler(serverSocket.accept(), services));
             } catch (Exception e) {
-                e.printStackTrace();
+                if (running) {
+                    log("Error aceptando conexión: " + e.getMessage());
+                }
             }
         }
-        try {
-            serverSocket.close();
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        log("Servidor detenido");
     }
 
     static void log(String msg) {
@@ -96,25 +110,37 @@ public class TCPController {
         @Override
         public void run() {
             String client = clientSocket.getInetAddress().getHostAddress() + ":" + clientSocket.getPort();
-            try {
-                log("Cliente conectado: " + client);
-                BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
-                BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(clientSocket.getOutputStream()));
+            log("Cliente conectado: " + client);
+            try (Socket socket = clientSocket;
+                 BufferedReader reader = new BufferedReader(
+                         new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+                 BufferedWriter writer = new BufferedWriter(
+                         new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8))) {
+                // un cliente que nunca envía el salto de línea no puede bloquear un hilo del pool indefinidamente
+                socket.setSoTimeout(READ_TIMEOUT_MS);
 
-                String line = reader.readLine();
-                Response response = handle(line, client);
+                Response response;
+                String json;
+                try {
+                    String line = reader.readLine();
+                    // la operación y la serialización se hacen bajo el mismo candado:
+                    // el cliente recibe un snapshot consistente del tablero compartido
+                    synchronized (services.getGame()) {
+                        response = handle(line, client);
+                        // gson sin pretty printing: la respuesta debe ser una sola línea
+                        json = gson.toJson(response);
+                    }
+                } catch (SocketTimeoutException e) {
+                    response = error("Tiempo de espera agotado: no se recibió una línea completa en "
+                            + READ_TIMEOUT_MS + " ms");
+                    json = gson.toJson(response);
+                }
 
-                // gson sin pretty printing: la respuesta debe ser una sola línea
-                String json = gson.toJson(response);
                 writer.write(json);
                 writer.newLine();
                 writer.flush();
-                writer.close();
-                reader.close();
-
-                clientSocket.close();
                 log("Respuesta enviada a " + client + ": status=" + response.status + ". Cliente desconectado");
-            } catch (Exception e) {
+            } catch (IOException e) {
                 log("Error atendiendo a " + client + ": " + e);
             }
         }

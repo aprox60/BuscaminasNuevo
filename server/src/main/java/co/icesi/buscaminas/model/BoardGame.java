@@ -12,7 +12,7 @@ public class BoardGame {
         return mines;
     }
 
-    public int initGame(int n, int m, int mines){
+    public synchronized int initGame(int n, int m, int mines){
         this.mines = mines;
         board = new Cell[n][m];
         Random rd = new Random();
@@ -23,12 +23,13 @@ public class BoardGame {
                 board[i][j] = new Cell(isMine,0);
             }
         }
-        for (int i = 0; i < mines; i++) {
-            int k =rd.nextInt(n);
-            int l = rd.nextInt(m);
-            Cell cell = board[k][l];
-            mi += cell.isLandMine()?0:1;
-            cell.setLandMine(true);
+        // se repite el sorteo hasta colocar exactamente 'mines' minas en posiciones distintas
+        while (mi < mines) {
+            Cell cell = board[rd.nextInt(n)][rd.nextInt(m)];
+            if (!cell.isLandMine()) {
+                cell.setLandMine(true);
+                mi++;
+            }
         }
         for (int i = 0; i <n; i++) {
             for (int j = 0; j < m; j++) {
@@ -42,7 +43,7 @@ public class BoardGame {
         return mi;
     }
 
-    public void showAll(boolean show){
+    public synchronized void showAll(boolean show){
         for (int i = 0; i <board.length; i++) {
             for (int j = 0; j < board[0].length; j++) {
                 board[i][j].setShowAll(show);
@@ -63,7 +64,7 @@ public class BoardGame {
         return mines;
     }
 
-    public void printBoard(){
+    public synchronized void printBoard(){
         System.out.println();
         System.out.print("   ");
         for (int i = 0; i < board[0].length; i++) {
@@ -78,7 +79,7 @@ public class BoardGame {
             System.out.println(" ]");
         }
     }
-    public boolean selectCell(int i, int j){
+    public synchronized boolean selectCell(int i, int j){
         validateCoordinates(i, j);
         Cell cell = board[i][j];
         if (cell.isMarked()) {
@@ -127,11 +128,11 @@ public class BoardGame {
         }
     }
 
-    public Cell[][] getBoard() {
+    public synchronized Cell[][] getBoard() {
         return board;
     }
 
-    public void markCell(int i, int j) {
+    public synchronized void markCell(int i, int j) {
         validateCoordinates(i, j);
         Cell cell = board[i][j];
         if (cell.isHide()) {
